@@ -1,6 +1,8 @@
 node_modules/
-.DS_Store
 .env
+.DS_Store
+prism.log
 reports/*.xml
 reports/*.html
-prism.log
+reports/*.json
+!reports/.gitkeep

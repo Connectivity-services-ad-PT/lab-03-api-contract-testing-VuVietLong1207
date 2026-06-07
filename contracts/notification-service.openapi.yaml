@@ -1,0 +1,413 @@
+openapi: 3.1.0
+
+info:
+  title: Multi-Channel Alert Service API
+  version: 1.1.0
+  description: |
+    API cho dịch vụ cảnh báo đa kênh (Notification Service - B7).
+    Hệ thống hỗ trợ gửi SMS, Email, Push Notification và Callback trạng thái về cho Core Business (B6).
+  contact:
+    name: FIT4110 Teaching Team
+    email: fit4110@example.edu.vn
+
+servers:
+  - url: http://localhost:4010
+    description: Prism mock server
+  - url: https://api.campus.local
+    description: Class network placeholder
+
+tags:
+  - name: health
+    description: Kiểm tra trạng thái service
+  - name: alerts
+    description: Dịch vụ quản lý và gửi cảnh báo cho hệ thống
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  # ==================== PATH 1: HEALTH CHECK ====================
+  /health:
+    get:
+      operationId: getHealth
+      summary: Kiểm tra trạng thái service
+      description: "Kiểm tra trạng thái hoạt động thực tế (Health Status) của Notification Service."
+      tags:
+        - health
+      security: []
+      responses:
+        '200':
+          description: Service đang hoạt động
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              examples:
+                ok:
+                  value:
+                    status: ok
+                    service: notification-service
+                    time: '2026-05-26T08:00:00Z'
+
+  # ==================== PATH 2: POST ALERT ====================
+  /alerts:
+    post:
+      operationId: createAlert
+      summary: Gửi cảnh báo đa kênh
+      description: |
+        Core Business (B6) gửi yêu cầu kèm theo cấu hình chi tiết của cảnh báo.
+      tags:
+        - alerts
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Khóa chống gửi trùng lặp.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+            examples:
+              emailAlert:
+                value:
+                  sourceService: "core-business"
+                  alertType: "UNAUTHORIZED_ACCESS"
+                  severity: "HIGH"
+                  message: "Phat hien truy cap trai phep tai cong chinh"
+                  relatedEventId: "0196fb3d-4ad7-7d1e-9f49-5d5148d2babc"
+      responses:
+        '202':
+          description: Yêu cầu thông báo đã được tiếp nhận thành công.
+          content:
+            application/json:
+              schema: 
+                $ref: '#/components/schemas/NotificationAccepted'
+              examples:
+                accepted:
+                  value:
+                    notificationId: "0196fb3d-4ad7-7d1e-9f49-5d5148d2cccc"
+                    status: "PENDING"
+                    acceptedAt: "2026-05-26T08:45:00Z"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== PATH 3: GET RECENT ALERTS ====================
+  /alerts/recent:
+    get:
+      operationId: getRecentAlerts
+      summary: Tra cứu danh sách các cảnh báo gần đây
+      description: Lấy thông tin chi tiết các cảnh báo hệ thống vừa ghi nhận.
+      tags:
+        - alerts
+      responses:
+        '200':
+          description: Danh sách trạng thái thông báo hiện tại.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationStatusDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== PATH 4: USER PREFERENCES ====================
+  /notifications/preferences/{userId}:
+    put:
+      operationId: updateNotificationPreferences
+      summary: Cấu hình tắt/bật nhận thông báo của người dùng
+      description: Cho phép cấu hình xem user có muốn nhận thông báo qua các kênh cụ thể hay không.
+      tags:
+        - alerts
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePreferencesRequest'
+      responses:
+        '200':
+          description: Cấu hình preferences thành công.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: boolean
+                    example: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+webhooks:
+  notificationStatusUpdated:
+    post:
+      operationId: onNotificationStatusUpdated
+      summary: Callback trạng thái notification
+      tags:
+        - alerts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NotificationStatusEvent'
+      responses:
+        '200':
+          description: Đối tác đã nhận thành công sự kiện callback.
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Dữ liệu gửi lên sai cấu trúc hoặc định dạng định nghĩa.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Thiếu Token hoặc Token không hợp lệ.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Không tìm thấy tài nguyên yêu cầu.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    UnprocessableEntity:
+      description: Lỗi logic nghiệp vụ.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    InternalServerError:
+      description: Lỗi hệ thống không mong muốn.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+
+    HealthStatus:
+      type: object
+      additionalProperties: false
+      required: [status, service, time]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        service:
+          type: string
+        time:
+          type: string
+          format: date-time
+
+    AlertSeverity:
+      type: string
+      enum: [LOW, MEDIUM, HIGH, CRITICAL]
+
+    ChannelConfigBase:
+      type: object
+      required: [channelType]
+      properties:
+        channelType:
+          type: string
+          enum: [SMS, EMAIL, PUSH]
+
+    SMSChannelConfig:
+      allOf:
+        - $ref: '#/components/schemas/ChannelConfigBase'
+        - type: object
+          required: [phoneNumber]
+          properties:
+            phoneNumber:
+              type: string
+              pattern: '^\+?[0-9]{10,15}$'
+              example: "+84987654321"
+
+    EmailChannelConfig:
+      allOf:
+        - $ref: '#/components/schemas/ChannelConfigBase'
+        - type: object
+          required: [recipientEmail, subject]
+          properties:
+            recipientEmail:
+              type: string
+              format: email
+              example: "student@dnu.edu.vn"
+            subject:
+              type: string
+              minLength: 5
+              maxLength: 200
+
+    PushChannelConfig:
+      allOf:
+        - $ref: '#/components/schemas/ChannelConfigBase'
+        - type: object
+          required: [deviceToken]
+          properties:
+            deviceToken:
+              type: string
+              example: "bk3a71b:CI2p_9G851w..."
+
+    AlertRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - sourceService
+        - alertType
+        - severity
+        - message
+        - relatedEventId
+      properties:
+        sourceService:
+          type: string
+          example: "core-business"
+        alertType:
+          type: string
+          example: "UNAUTHORIZED_ACCESS"
+        severity:
+          $ref: '#/components/schemas/AlertSeverity'
+        message:
+          type: string
+          minLength: 5
+          example: "Phat hien truy cap trai phep tai cong chinh"
+        relatedEventId:
+          type: string
+          format: uuid
+          example: "0196fb3d-4ad7-7d1e-9f49-5d5148d2babc"
+
+    NotificationAccepted:
+      type: object
+      additionalProperties: false
+      required: [notificationId, status, acceptedAt]
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING]
+        acceptedAt:
+          type: string
+          format: date-time
+
+    NotificationStatusDetail:
+      type: object
+      additionalProperties: false
+      required: [notificationId, alertId, currentStatus, targetUserId]
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+        alertId:
+          type: string
+          format: uuid
+        currentStatus:
+          type: string
+          enum: [PENDING, SENT, FAILED]
+        targetUserId:
+          type: string
+      sentAt:
+        type: [string, "null"]
+        format: date-time
+      errorMessage:
+        type: [string, "null"]
+
+    UpdatePreferencesRequest:
+      type: object
+      required: [enabledChannels]
+      properties:
+        enabledChannels:
+          type: array
+          items:
+            type: string
+            enum: [SMS, EMAIL, PUSH]
+
+    NotificationStatusEvent:
+      type: object
+      additionalProperties: false
+      required: [eventId, eventType, occurredAt, correlationId, source, data]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          const: notification.status.updated
+        occurredAt:
+          type: string
+          format: date-time
+        correlationId:
+          type: string
+        source:
+          type: string
+        data:
+          type: object
+          required: [notificationId, alertId, status]
+          properties:
+            notificationId:
+              type: string
+              format: uuid
+            alertId:
+              type: string
+              format: uuid
+            status:
+              type: string
+
+    Problem:
+      type: object
+      additionalProperties: false
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599  
+        detail:
+          type: [string, "null"]
+        instance:
+          type: [string, "null"]
+          format: uri
